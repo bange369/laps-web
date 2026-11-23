@@ -36,8 +36,8 @@
       <div style="margin-top:12px;">
         <label>Ваш логин GitHub</label>
         <input id="owner" type="text" placeholder="username">
-        <label>Имя приватного репозитория</label>
-        <input id="repo" type="text" value="laps-bridge">
+        <label>Имя закрытого репозитория</label>
+        <input id="repo" type="text" placeholder="Например: laps-bridge">
         <label>GitHub Token</label>
         <input id="token" type="password" placeholder="github_pat_...">
         <button class="btn-secondary" onclick="saveCfg()">Сохранить на телефоне</button>
@@ -105,7 +105,7 @@
             const parsed = JSON.parse(fromB64(data.content));
             if (parsed.id === reqId) {
               if (parsed.status === 'ok') {
-                box.innerHTML = `<div>ПК: <b>${parsed.pc}</b></div><div class="pass-box" id="lapsOut">${parsed.laps}</div><button class="btn-secondary" onclick="navigator.clipboard.writeText(document.getElementById('lapsOut').innerText)">Скопировать пароль</button>`;
+                box.innerHTML = `<div>ПК: <b>${parsed.pc}</b></div><div class="pass-box" id="lapsOut">${parsed.laps}</div><button class="btn-secondary" onclick="navigator.clipboard.writeText(document.getElementById('lapsOut').innerText); this.innerText='Скопировано!';">Скопировать пароль</button>`;
               } else {
                 box.innerHTML = `<span class="err">${parsed.message}</span>`;
               }
