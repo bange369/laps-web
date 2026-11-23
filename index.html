@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>LAPS Доступ</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #F2F2F7; margin: 0; padding: 16px; color: #1C1C1E; }
+    .card { background: #FFF; border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    label { display: block; font-size: 13px; color: #6E6E73; margin-bottom: 6px; }
+    input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #D1D1D6; border-radius: 10px; font-size: 16px; margin-bottom: 14px; }
+    button { width: 100%; padding: 14px; background: #007AFF; color: #FFF; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #A2CFFE; }
+    .btn-secondary { background: #E5E5EA; color: #007AFF; margin-top: 8px; }
+    .result { margin-top: 16px; padding: 14px; border-radius: 12px; background: #F2F2F7; font-size: 15px; word-break: break-all; }
+    .pass-box { font-family: monospace; font-size: 20px; font-weight: 700; color: #000; margin: 8px 0; }
+    .err { color: #FF3B30; }
+    details { font-size: 14px; color: #6E6E73; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Запрос LAPS пароля</h2>
+    <label>Имя компьютера</label>
+    <input id="pc" type="text" placeholder="Например: ALAAP01PC89" autocapitalize="characters">
+    <label>Пароль от KAZPOST\d.bocharov</label>
+    <input id="pass" type="password" placeholder="Введите пароль для проверки на ПК">
+    <button id="sendBtn" onclick="requestLaps()">Проверить и получить пароль</button>
+    <div id="statusBox" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="card">
+    <details id="cfgDetails">
+      <summary>Настройки подключения (заполняется 1 раз)</summary>
+      <div style="margin-top:12px;">
+        <label>Ваш логин GitHub</label>
+        <input id="owner" type="text" placeholder="username">
+        <label>Имя приватного репозитория</label>
+        <input id="repo" type="text" value="laps-bridge">
+        <label>GitHub Token</label>
+        <input id="token" type="password" placeholder="github_pat_...">
+        <button class="btn-secondary" onclick="saveCfg()">Сохранить на телефоне</button>
+      </div>
+    </details>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    window.onload = () => {
+      ['owner', 'repo', 'token'].forEach(k => { if (localStorage.getItem(k)) $(k).value = localStorage.getItem(k); });
+      if (!localStorage.getItem('token')) $('cfgDetails').open = true;
+    };
+    function saveCfg() {
+      ['owner', 'repo', 'token'].forEach(k => localStorage.setItem(k, $(k).value.trim()));
+      $('cfgDetails').open = false;
+      alert('Настройки сохранены в памяти браузера');
+    }
+    function toB64(str) {
+      const bytes = new TextEncoder().encode(str);
+      let bin = ''; bytes.forEach(b => bin += String.fromCharCode(b)); return btoa(bin);
+    }
+    function fromB64(b64) {
+      const bin = atob(b64.replace(/\s/g, ''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    }
+    async function ghFetch(path, method = 'GET', bodyObj = null) {
+      const url = `https://api.github.com/repos/${localStorage.getItem('owner')}/${localStorage.getItem('repo')}/contents/${path}?t=${Date.now()}`;
+      const headers = {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'Accept': 'application/vnd.github+json'
+      };
+      const opts = { method, headers };
+      if (bodyObj) opts.body = JSON.stringify(bodyObj);
+      return fetch(url, opts);
+    }
+    async function requestLaps() {
+      const pc = $('pc').value.trim();
+      const pass = $('pass').value;
+      if (!pc || !pass) return alert('Введите имя ПК и пароль');
+      const box = $('statusBox');
+      box.style.display = 'block';
+      box.innerHTML = 'Отправка запроса на рабочий ПК...';
+      $('sendBtn').disabled = true;
+
+      try {
+        let sha = null;
+        const getRes = await ghFetch('task.json');
+        if (getRes.ok) { const d = await getRes.json(); sha = d.sha; }
+        const reqId = Date.now().toString();
+        const payload = { message: 'req', content: toB64(JSON.stringify({ id: reqId, pc, pass })) };
+        if (sha) payload.sha = sha;
+
+        const putRes = await ghFetch('task.json', 'PUT', payload);
+        if (!putRes.ok) throw new Error('Ошибка доступа к репозиторию. Проверьте токен.');
+
+        box.innerHTML = 'Проверка пароля в Active Directory на ПК...';
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const res = await ghFetch('result.json');
+          if (res.ok) {
+            const data = await res.json();
+            const parsed = JSON.parse(fromB64(data.content));
+            if (parsed.id === reqId) {
+              if (parsed.status === 'ok') {
+                box.innerHTML = `<div>ПК: <b>${parsed.pc}</b></div><div class="pass-box" id="lapsOut">${parsed.laps}</div><button class="btn-secondary" onclick="navigator.clipboard.writeText(document.getElementById('lapsOut').innerText)">Скопировать пароль</button>`;
+              } else {
+                box.innerHTML = `<span class="err">${parsed.message}</span>`;
+              }
+              $('sendBtn').disabled = false;
+              return;
+            }
+          }
+        }
+        box.innerHTML = '<span class="err">Таймаут: рабочий ПК не ответил за 30 секунд.</span>';
+      } catch (e) {
+        box.innerHTML = `<span class="err">${e.message}</span>`;
+      }
+      $('sendBtn').disabled = false;
+    }
+  </script>
+</body>
+</html>
