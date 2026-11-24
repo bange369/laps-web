@@ -35,12 +35,12 @@
       <summary>Настройки подключения (заполняется 1 раз)</summary>
       <div style="margin-top:12px;">
         <label>Ваш логин GitHub</label>
-        <input id="owner" type="text" placeholder="username">
+        <input id="owner" type="text" autocapitalize="none" autocorrect="off" placeholder="bange369">
         <label>Имя закрытого репозитория</label>
-        <input id="repo" type="text" placeholder="Например: laps-bridge">
+        <input id="repo" type="text" autocapitalize="none" autocorrect="off" placeholder="laps-bridge">
         <label>GitHub Token</label>
         <input id="token" type="password" placeholder="github_pat_...">
-        <button class="btn-secondary" onclick="saveCfg()">Сохранить на телефоне</button>
+        <button class="btn-secondary" onclick="saveCfg(false)">Сохранить на телефоне</button>
       </div>
     </details>
   </div>
@@ -51,10 +51,15 @@
       ['owner', 'repo', 'token'].forEach(k => { if (localStorage.getItem(k)) $(k).value = localStorage.getItem(k); });
       if (!localStorage.getItem('token')) $('cfgDetails').open = true;
     };
-    function saveCfg() {
-      ['owner', 'repo', 'token'].forEach(k => localStorage.setItem(k, $(k).value.trim()));
-      $('cfgDetails').open = false;
-      alert('Настройки сохранены в памяти браузера');
+    function saveCfg(silent) {
+      ['owner', 'repo', 'token'].forEach(k => {
+        const val = $(k).value.trim();
+        if (val) localStorage.setItem(k, val);
+      });
+      if (!silent) {
+        $('cfgDetails').open = false;
+        alert('Настройки сохранены в памяти браузера');
+      }
     }
     function toB64(str) {
       const bytes = new TextEncoder().encode(str);
@@ -67,19 +72,33 @@
       return new TextDecoder().decode(bytes);
     }
     async function ghFetch(path, method = 'GET', bodyObj = null) {
-      const url = `https://api.github.com/repos/${localStorage.getItem('owner')}/${localStorage.getItem('repo')}/contents/${path}?t=${Date.now()}`;
+      const base = `https://api.github.com/repos/${localStorage.getItem('owner')}/${localStorage.getItem('repo')}/contents/${path}`;
+      const url = method === 'GET' ? `${base}?t=${Date.now()}` : base;
       const headers = {
         'Authorization': `Bearer ${localStorage.getItem('token')}`,
         'Accept': 'application/vnd.github+json'
       };
       const opts = { method, headers };
-      if (bodyObj) opts.body = JSON.stringify(bodyObj);
+      if (bodyObj) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(bodyObj);
+      }
       return fetch(url, opts);
     }
     async function requestLaps() {
+      saveCfg(true);
+      const owner = localStorage.getItem('owner');
+      const repo = localStorage.getItem('repo');
+      const token = localStorage.getItem('token');
       const pc = $('pc').value.trim();
       const pass = $('pass').value;
+
+      if (!owner || !repo || !token) {
+        $('cfgDetails').open = true;
+        return alert('Заполните логин, репозиторий и токен в настройках ниже');
+      }
       if (!pc || !pass) return alert('Введите имя ПК и пароль');
+
       const box = $('statusBox');
       box.style.display = 'block';
       box.innerHTML = 'Отправка запроса на рабочий ПК...';
@@ -94,7 +113,11 @@
         if (sha) payload.sha = sha;
 
         const putRes = await ghFetch('task.json', 'PUT', payload);
-        if (!putRes.ok) throw new Error('Ошибка доступа к репозиторию. Проверьте токен.');
+        if (!putRes.ok) {
+          let errInfo = `HTTP ${putRes.status}`;
+          try { const eData = await putRes.json(); if (eData.message) errInfo += `: ${eData.message}`; } catch (e) {}
+          throw new Error(`Ошибка GitHub (${errInfo})`);
+        }
 
         box.innerHTML = 'Проверка пароля в Active Directory на ПК...';
         for (let i = 0; i < 15; i++) {
